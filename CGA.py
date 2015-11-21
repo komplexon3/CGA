@@ -3,16 +3,25 @@
 # for support contact marcmwwidmer@gmail.com
 
 import urllib2
+import threading
 import json
 import time
 import csv
 
 debug = False
 
+printLock = threading.Lock()
+rawDataArrLock = threading.Lock()
+threads =[]
+
+def threadPrint(input):
+	printLock.acquire()
+	print(input)
+	printLock.release()
+
 class GenderAdd():
 	genderData = {}
 	rawDataArr = []
-	
 	def __init__(self):
 		self.importFile = raw_input('\nEnter name of the CSV file to which you want to add gender information with extension e.g. .csv: ')
 		self.excel = True if raw_input('\nWas this file orinally a excel file? (yes/no): ') == 'yes' else False
@@ -128,34 +137,39 @@ class GenderAdd():
 			self.urls.append(url)
 
 	def dataRequest(self, reqUrl, reqN):
-		print 'Sending request #' + str(reqN+1) + '...'
+		threadPrint('Sending request #' + str(reqN+1) + '...')
 		
 		try:
 			req = urllib2.urlopen(reqUrl)
 		except urllib2.HTTPError as error:
-			print '\n#########################################################\n\nERROR ' + str(error.code) + ' - ' + str(error.reason) + '\n'
+			threadPrint('\n#########################################################\n\nERROR ' + str(error.code) + ' - ' + str(error.reason) + '\n')
 			if error.code == 429:
-				print '######################################################### \n\nYou used up all 1000 names. Try again tomorrow or change internet access.'
-				print '\n#########################################################\n\nAboarding Requests... \nClosing CGA...\n'
+				threadPrint('######################################################### \n\nYou used up all 1000 names. Try again tomorrow or change internet access.')
+				threadPrint('\n#########################################################\n\nAboarding Requests... \nClosing CGA...\n')
 			raise SystemExit
 		except urllib2.URLError as error:
-			print '\n#########################################################\n\nERROR ' + str(error.args[0][0]) + ' - ' + str(error.args[0][1])
+			threadPrint('\n#########################################################\n\nERROR ' + str(error.args[0][0]) + ' - ' + str(error.args[0][1]))
 			if error.args[0][0] == 8:
-				print'\n######################################################### \n\nNo intenet connection. Connect to the internet and try again.'
-			print'\n#########################################################\n\nAboarding Requests... \nClosing CGA...\n'
+				threadPrint('\n######################################################### \n\nNo intenet connection. Connect to the internet and try again.')
+			threadPrint('\n#########################################################\n\nAboarding Requests... \nClosing CGA...\n')
 			raise SystemExit
 			
-		print 'Answer for request #' + str(reqN+1) + ' received.'
+		threadPrint('Answer for request #' + str(reqN+1) + ' received.')
 		jData = req.read()
 		data = json.loads(jData)
 		if debug: print ans #debug
+		rawDataArrLock.acquire()
 		self.rawDataArr.extend(data)
-		print 'Raw data from request #' + str(reqN+1) + ' saved.'
+		rawDataArrLock.release()
+		threadPrint('Raw data from request #' + str(reqN+1) + ' saved.')
 
-	def requestController(self):
+	def requestThreadsController(self):
 		urlsLen = len(self.urls)
 		for i in range(urlsLen):
-			self.dataRequest(self.urls[i], i)
+			threads.append(requestThread(self, self.urls[i], i))
+			threads[i].start()
+		for thread in threads:
+			thread.join()
 
 	def rawDataProcessor(self):
 		for i in range(self.nLen):
@@ -186,7 +200,7 @@ class GenderAdd():
 				self.csvData[i][self.pIndex] = self.genderData[name][1]
 				if debug: print str(i) #debug
 				
-				if debug: print self.csvData #debug
+		if debug: print self.csvData #debug
 
 	def csvDataCleaner(self): #getting rid of the f**king "'s
 		for row in range(self.csvLen):
@@ -204,7 +218,7 @@ class GenderAdd():
 		start = time.time()
 		self.csvImporter()
 		self.urlsCreator()
-		self.requestController()
+		self.requestThreadsController()
 		self.rawDataProcessor()
 		self.csvDataFiller()
 		self.csvDataCleaner()
@@ -212,7 +226,18 @@ class GenderAdd():
 		duration = time.time() - start
 		print '\n#########################################################\n\nFinishhed.\nThe task took ' + str(duration) + ' seconds to complete.\n'
 
+class requestThread (threading.Thread):
+	def __init__(self, gAdder, reqUrl, reqN):
+		threading.Thread.__init__(self)
+		self.gAdder = gAdder
+		self.reqUrl = reqUrl
+		self.reqN = reqN
+
+	def run(self):
+		self.gAdder.dataRequest(self.reqUrl, self.reqN)
+
 if True:
 	print '\nWelcome to CGV - CSV Gender Adder - 2015 \n\nby Nasib Naimi & Marc Widmer - written by Marc Widmer \nIf any errors or other problems occur, contact marcmwwidmer@gmail.com \n\nThis program takes a csv contacts file and adds all given information plus the gender and the probability that it is this gender to a new CSV file. This is done using the web database of "genderize.io". Even though this database covers a wide selcetion of names, some are missing. If this is the case, the gender will be set to "unknown" and the probability to 0%. \n\nIMPORTANT: The web database used in this program limits the amount of requests to 1000 names per day. Therefore if you go over this limit, the program will inform you and then close. If this problem occurs, try again tomorrow or change your internet access to bypass this limitation. \n\nPlace the file you want to add the gender information to into the same folder as this script and then follow the the commands below.'
+
 	genderAdd = GenderAdd()
 	genderAdd.main()
